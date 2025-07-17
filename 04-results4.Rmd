@@ -1,0 +1,393 @@
+# Figure 4
+Validation of the RF8 model
+
+## Validation of RF8 model (RJAML-Cohort 2)
+
+```{r}
+# Load the trained model
+# rf_tuned <- readRDS("../03.out/figure3/AZA_VEN_RandomForest8.rds")
+# 
+# # Load the new data for Cohort 2
+# newDat <- read_xlsx("../02.data/rjaml_test_all.xlsx")
+# newDat <- newDat[, -1]  # Remove the first column (Patient ID)
+# 
+# # Select features and log-transform
+# data_selected <- newDat[, c("Response", selected_features)]
+# data_selected[, -1] <- log2(data_selected[, -1] + 1)
+# 
+# # Predict class labels and probabilities for Cohort 2
+# new_predictions <- predict(rf_tuned, newdata = data_selected)
+# new_probabilities <- predict(rf_tuned, newdata = data_selected, type = "prob")
+# 
+# # Add predictions to the dataset
+# newDat$Predicted_Response <- new_predictions
+# newDat$RF8.prob.CR <- new_probabilities[, "CR"]
+# write.csv(newDat, "../03.out/figure4/RF8_Cohort2.csv")
+```
+
+```{r}
+# Compute and plot ROC for Cohort 2
+newDat <- read.csv("../03.out/figure4/RF8_Cohort2.csv", header = T)
+roc_obj <- roc(newDat$Response, newDat$RF8.prob.CR)
+roc_obj$auc
+
+plot(smooth(roc_obj), legacy.axes = TRUE, lwd = 2,
+     main = "Cohort 2 (N = 32)",
+     xlab = "False Positive Rate (1 - Specificity)", 
+     ylab = "True Positive Rate (Sensitivity)", 
+     cex.main = 1.5, cex.lab = 1.2, cex.axis = 1.1)
+abline(h = seq(0, 1, by = 0.1), v = seq(0, 1, by = 0.1), col = "gray80", lty = 2)
+legend("bottomright", legend = c(paste("AUC =", round(roc_obj$auc, 2))),
+       col = "#1f77b4", lwd = 2, bty = "n", cex = 1.2)
+
+# Compute and plot Precision-Recall (PR) curve for Cohort 2
+newDat$Response <- factor(newDat$Response, levels = c("NonCR", "CR"))
+response_binary <- as.numeric(newDat$Response) - 1
+pr_curve <- pr.curve(scores.class0 = newDat$RF8.prob.CR, weights.class0 = response_binary, curve = TRUE)
+
+plot(pr_curve, main = "Cohort 2 (N = 32)", color = "#1f77b4", auc.main = FALSE)
+abline(h = seq(0, 1, by = 0.1), v = seq(0, 1, by = 0.1), col = "gray80", lty = 2)
+legend("bottomright", legend = c(paste("AUPRC =", round(pr_curve$auc.integral, 2))),
+       col = "#1f77b4", lwd = 2, bty = "n", cex = 1.2)
+
+```
+
+## Validation of RF8 model (FPMTB)
+
+```{r}
+# newDat <- read_xlsx("../02.data/Validation_Exvivo_FPMTB_84Genes_43R_55S.xlsx")
+# newDat <- newDat[, -1]  # Remove the first column (Patient ID)
+# # Select features and log-transform
+# data_selected <- newDat[, c("Response", selected_features)]
+# data_selected[, -1] <- log2(data_selected[, -1] + 1)
+# 
+# # Predict class labels and probabilities for the FPMTB set
+# new_predictions <- predict(rf_tuned, newdata = data_selected)
+# new_probabilities <- predict(rf_tuned, newdata = data_selected, type = "prob")
+# 
+# # Add predictions to the dataset
+# newDat$Predicted_Response <- new_predictions
+# newDat$RF8.prob.CR <- new_probabilities[, "CR"]
+# write.csv(newDat, "../03.out/figure4/RF8_FPMTB.csv")
+```
+
+```{r}
+newDat <- read.csv("../03.out/figure4/RF8_FPMTB.csv", header = T)
+roc_obj <- roc(newDat$Response, newDat$RF8.prob.CR)
+roc_obj$auc
+
+plot(smooth(roc_obj), legacy.axes = TRUE, lwd = 2,
+     main = "FPMTB set (N = 98)",
+     xlab = "False Positive Rate (1 - Specificity)", 
+     ylab = "True Positive Rate (Sensitivity)", 
+     cex.main = 1.5, cex.lab = 1.2, cex.axis = 1.1)
+abline(h = seq(0, 1, by = 0.1), v = seq(0, 1, by = 0.1), col = "gray80", lty = 2)
+legend("bottomright", legend = c(paste("AUC =", round(roc_obj$auc, 2))),
+       col = "#1f77b4", lwd = 2, bty = "n", cex = 1.2)
+
+# Compute and plot Precision-Recall (PR) curve for the FPMTB set
+newDat$Response <- factor(newDat$Response, levels = c("NonCR", "CR"))
+response_binary <- as.numeric(newDat$Response) - 1
+pr_curve <- pr.curve(scores.class0 = newDat$RF8.prob.CR, weights.class0 = response_binary, curve = TRUE)
+
+plot(pr_curve, main = "FPMTB set (N = 98)", color = "#1f77b4", auc.main = FALSE)
+abline(h = seq(0, 1, by = 0.1), v = seq(0, 1, by = 0.1), col = "gray80", lty = 2)
+legend("bottomright", legend = c(paste("AUPRC =", round(pr_curve$auc.integral, 2))),
+       col = "#1f77b4", lwd = 2, bty = "n", cex = 1.2)
+```
+
+## Validation of RF8 model (BeatAML)
+
+```{r}
+# newDat <- read_xlsx("../02.data/Validation_Exvivo_BeatAML_84Genes_170R_88S.xlsx")
+# newDat <- newDat[, -1]  # Remove the first column (Patient ID)
+# # Select features and log-transform
+# data_selected <- newDat[, c("Response", selected_features)]
+# data_selected[, -1] <- log2(data_selected[, -1] + 1)
+# # Predict class labels and probabilities for the BeatAML set
+# new_predictions <- predict(rf_tuned, newdata = data_selected)
+# new_probabilities <- predict(rf_tuned, newdata = data_selected, type = "prob")
+# # Add predictions to the dataset
+# newDat$Predicted_Response <- new_predictions
+# newDat$RF8.prob.CR <- new_probabilities[, "CR"]
+# write.csv(newDat, "../03.out/figure4/RF8_BeatAML.csv")
+```
+
+```{r}
+newDat <- read.csv("../03.out/figure4/RF8_BeatAML.csv", header = T)
+# Compute and plot ROC for the BeatAML set
+roc_obj <- roc(newDat$Response, newDat$RF8.prob.CR)
+roc_obj$auc
+
+plot(smooth(roc_obj), legacy.axes = TRUE, lwd = 2,
+     main = "BeatAML set (N = 258)",
+     xlab = "False Positive Rate (1 - Specificity)", 
+     ylab = "True Positive Rate (Sensitivity)", 
+     cex.main = 1.5, cex.lab = 1.2, cex.axis = 1.1)
+abline(h = seq(0, 1, by = 0.1), v = seq(0, 1, by = 0.1), col = "gray80", lty = 2)
+legend("bottomright", legend = c(paste("AUC =", round(roc_obj$auc, 2))),
+       col = "#1f77b4", lwd = 2, bty = "n", cex = 1.2)
+
+
+# Compute and plot Precision-Recall (PR) curve for the BeatAML set
+newDat$Response <- factor(newDat$Response, levels = c("NonCR", "CR"))
+response_binary <- as.numeric(newDat$Response) - 1
+pr_curve <- pr.curve(scores.class0 = newDat$RF8.prob.CR, weights.class0 = response_binary, curve = TRUE)
+
+plot(pr_curve, main = "BeatAML set (N = 258)", color = "#1f77b4", auc.main = FALSE)
+abline(h = seq(0, 1, by = 0.1), v = seq(0, 1, by = 0.1), col = "gray80", lty = 2)
+legend("bottomright", legend = c(paste("AUPRC =", round(pr_curve$auc.integral, 2))),
+       col = "#1f77b4", lwd = 2, bty = "n", cex = 1.2)
+
+```
+
+## Violin and Boxplots for Response Probability (RF8) 
+
+```{r}
+library(ggplot2)
+library(reshape2)
+library(ggpubr)
+library(patchwork)
+
+# Define a function to generate plots for each dataset
+generate_plot <- function(file_path, dataset_label) {
+  data <- read.csv(file_path, header = TRUE, row.names = 1)
+  data$dataset <- dataset_label
+  
+  p <- ggplot(data, aes(x = Response, y = RF8.prob.CR, fill = Response)) +
+    geom_violin(trim = FALSE) +
+    geom_boxplot(width = 0.1, position = position_dodge(0.9), outlier.shape = NA) +
+    scale_fill_manual(values = c("#93C89A", "#FFCC98")) +
+    facet_wrap(.~ dataset) +
+    labs(title = "",
+         x = "True Response",
+         y = "Response probability (RF8)") +
+    theme_classic() +
+    theme(legend.position = "none") +
+    stat_compare_means(aes(label = ..p.format..), comparisons = list(c("CR", "NonCR")))
+  
+  return(p)
+}
+
+p6 <- generate_plot("../03.out/figure4/RF8_Cohort2.csv", "Cohort 2")
+p7 <- generate_plot("../03.out/figure4/RF8_FPMTB.csv", "FPMTB set")
+p8 <- generate_plot("../03.out/figure4/RF8_BeatAML.csv", "BeatAML set")
+
+plots <- p6 | p7 | p8 
+plots
+
+```
+
+## RF8 score among clusters
+
+```{r}
+library(ggplot2)
+library(reshape2)
+library(ggpubr)
+library(patchwork)
+
+dat1 <- read.csv("../03.out/figure4/RF8_FPMTB.csv", header = T)
+p1 <- ggplot(dat1, aes(x = factor(Cluster), y = RF8.prob.CR, fill = factor(Cluster))) +
+    geom_violin(trim = FALSE, alpha = 0.5) +
+    geom_boxplot(width = 0.25, alpha = 0.75, position = position_dodge(0.9), outlier.shape = NA) +
+    labs(title = "FPMTB", x = "Cluster", y = "Response probability (RF8)") +
+    theme_classic() +
+    theme(legend.position = "none") +
+    stat_compare_means(
+        comparisons = list(c('1', '2'), c('1', '3'), c('2', '3')),
+        method = "wilcox.test",
+        label = "p.signif"
+    ) +
+    scale_fill_manual(values = c("#e9b383", "#7c9d97", "#9cb0c3"))
+p1
+
+dat2 <- read.csv("../03.out/figure4/RF8_BeatAML.csv", header = T)
+p2 <- ggplot(dat2, aes(x = factor(Cluster), y = RF8.prob.CR, fill = factor(Cluster))) +
+    geom_violin(trim = FALSE, alpha = 0.5) +
+    geom_boxplot(width = 0.25, alpha = 0.75, position = position_dodge(0.9), outlier.shape = NA) +
+    labs(title = "BeatAML", x = "Cluster", y = "Response probability (RF8)") +
+    theme_classic() +
+    theme(legend.position = "none") +
+    stat_compare_means(
+        comparisons = list(c('1', '2'), c('1', '3'), c('2', '3')),
+        method = "wilcox.test",
+        label = "p.signif"
+    ) +
+    scale_fill_manual(values = c("#e9b383", "#7c9d97", "#9cb0c3"))
+p2
+
+ggsave(p1, filename = "../03.out/figure4/RF8_FPMTB_clusters.pdf", width = 5, height = 3.6)
+ggsave(p2, filename = "../03.out/figure4/RF8_BeatAML_clusters.pdf", width = 5, height = 3.6)
+
+```
+
+
+## Integration of ex vivo drug-response in BeatAML
+
+```{r eval=TRUE, message = FALSE, warning = FALSE}
+# Obtain the clinically approved drugs for AML
+library(reshape2)
+library(ggridges)
+library(ggplot2)
+library(tidyr)
+library(tidyverse)
+library(ggpubr)
+library(patchwork)
+drug_auc <- read.table("../02.data/01_BeatAML_Inhibitor_AUC_values_v4_dbgap.txt", header = T,sep = "\t", check.names = FALSE)
+drug_select <- subset(drug_auc, inhibitor %in% c("Azacytidine", "Venetoclax"))
+drug_select <- drug_select[, c("Sample", "inhibitor", "auc")]
+dat <- dcast(drug_select, Sample~inhibitor)
+colnames(dat) <- c("Sample", "Azacitidine", "Venetoclax" )
+id <- read.csv("../02.data/02_RNAseq_Sample_ids.csv", header = T, check.names = FALSE) 
+dat <- merge(dat, id, by = "Sample")
+row.names(dat) <- dat$Sample
+dat <- subset(dat, dat$diseaseStageAtSpecimenCollection %in% c("Initial Diagnosis", "Relapse"))
+dat <- subset(dat, dat$rnaSeq == "y")
+### select samples having more than 2 drugs tested
+dat$NA_number <- rowSums(is.na(dat[, 2:3]))
+dat <- subset(dat, NA_number == 0)
+dat <- dat[, c("Azacitidine", "Venetoclax")]
+head(dat)
+
+```
+
+## BeatAML Waves 1-4 heatmap based on drug profiling
+
+```{r}
+library(pheatmap)
+core_mat <- dat
+core_mat1 <- as.matrix(t(core_mat))
+core_mat1 <- log2(core_mat1 + 1)
+# core_mat1 <- core_mat1 - apply(core_mat1, 1, mean)
+# core_mat1[which(core_mat1 < -2)] <- -2
+# core_mat1[which(core_mat1 > 2)] <- 2
+bk <- unique(c(seq(-2, 2, length=100)))
+out <- pheatmap(core_mat1,
+                breaks = bk, 
+                cutree_cols = 2,
+                color = colorRampPalette(c("#8C510A", "#F5F5F5",  "#01665E"))(100), 
+                scale = "row", border_color = "black", angle_col = 90,
+                show_rownames = TRUE, show_colnames = FALSE,
+                clustering_method = "ward.D",
+                #annotation_colors = ann_colors,
+                #annotation_col = annotation_col,
+                cluster_cols = T, cluster_rows = T
+)
+# Order of clustered samples
+clust_sample <- colnames(core_mat1[,out$tree_col[["order"]]])
+clust_sample <- data.frame(clust_sample)
+sample_cluster <- data.frame(cutree(out$tree_col, k=3))
+colnames(sample_cluster) <- "Cluster"
+data <- data.frame(core_mat)
+data <- cbind(data, sample_cluster)
+data$group <- ifelse(data$Cluster == 1, "Resistant", "Sensitive")
+table(data$group)
+# write.csv(data, "../03.out/figure4/BeatAML_exVivo_Resistant_Sensitive_Raw.csv")
+
+sample_cluster$Lable <- ifelse(data$Cluster == 1, "Resistant", "Sensitive")
+annotation_col = data.frame(
+  Lable = factor(sample_cluster$Lable)
+  )
+rownames(annotation_col) = colnames(core_mat1)
+ann_colors = list(
+  Lable = c(Sensitive = "#7c9d97", Resistant = "#e9b383")
+)
+
+# pdf("../03.out/figure4/01.BeatAML_exVivo_drug_heatmap.pdf", width = 10, height = 2)
+out <- pheatmap(core_mat1,
+                breaks = bk, 
+                cutree_cols = 3,
+                color = colorRampPalette(c("#8C510A", "#F5F5F5",  "#01665E"))(100), 
+                scale = "row", border_color = "black", angle_col = 90,
+                show_rownames = TRUE, show_colnames = FALSE,
+                clustering_method = "ward.D",
+                annotation_colors = ann_colors,
+                annotation_col = annotation_col,
+                cluster_cols = T, cluster_rows = T
+)
+# dev.off()
+
+# Extract scaled values from the heatmap object
+# Create matrix and scale manually (same scaling as pheatmap uses)
+core_matrix <- as.matrix(core_mat1)
+scale_rows <- function(x) {
+  m <- apply(x, 1, mean, na.rm = TRUE)
+  s <- apply(x, 1, sd, na.rm = TRUE)
+  return((x - m) / s)
+}
+scaled_matrix <- scale_rows(core_matrix)
+# Get cluster assignments (k=3)
+cluster_assignments <- data.frame(Cluster = cutree(out$tree_col, k = 3))
+# Combine scaled values with cluster assignments
+result_data <- cbind(t(scaled_matrix), cluster_assignments)
+# write.csv(result_data, "../03.out/figure4/BeatAML_exVivo_Resistant_Sensitive_scaled_scores.csv")
+```
+
+## Boxplot for drug sensitivitity between resistant and sensitive
+
+```{r}
+library(ggplot2)
+library(ggpubr)
+library(RColorBrewer)
+library(tidyverse)
+library(ggrastr)
+library(ggbeeswarm)
+mat <- read.csv("../03.out/figure4/BeatAML_exVivo_Resistant_Sensitive_Raw.csv", header = T, row.names = 1)
+mat <- mat[, c("group", "Azacitidine", "Venetoclax")]
+mat <- mat %>% gather(-"group", key = "drug", value = "AUC") 
+mat$drug <- factor(mat$drug, levels = c("Azacitidine","Venetoclax"))
+p <- ggplot(mat, aes(x = group, y = AUC, color = group)) + 
+  geom_boxplot_jitter() + geom_quasirandom(width=0.15, alpha = 0.75) +
+  facet_wrap(.~drug, ncol=3) + 
+  theme_pubr() + 
+  xlab("") + ylab("Drug resistance (AUC)") +
+  theme(strip.text.x = element_text(size=13)) +
+  stat_compare_means(label = "p.signif", comparisons = list(c('Resistant', 'Sensitive')), method='wilcox.test') + 
+  scale_color_manual(values = c("#e9b383", "#7c9d97")) + 
+  theme(legend.position='None')
+p
+
+## Cluster (1 2 3)
+mat <- read.csv("../03.out/figure4/BeatAML_exVivo_Resistant_Sensitive_Raw.csv", header = T, row.names = 1)
+mat <- mat[, c("Azacitidine", "Venetoclax", "Cluster")]
+mat <- mat %>% gather(-"Cluster", key = "drug", value = "sDSS") 
+
+mat$Cluster <- as.factor(mat$Cluster)
+
+p1 <- ggplot(mat, aes(x = Cluster, y = sDSS, color = Cluster)) + 
+  geom_boxplot_jitter() + 
+  geom_quasirandom(width=0.15, alpha = 0.5) +
+  facet_wrap(.~drug) + 
+  theme_pubr() + 
+  xlab("") + ylab("Drug resistance (AUC)") +
+  theme(strip.text.x = element_text(size=13)) +
+  stat_compare_means(comparisons = list(c('1', '2'), c('1', '3'), c('2', '3')), 
+                     method='wilcox.test', label =  "p.signif") + 
+  scale_color_manual(values = c("#e9b383", "#7c9d97", "#9cb0c3")) +  
+  theme(legend.position='None')
+p1
+
+###################################
+####### Scaled sensitivity scores
+###################################
+
+# Clusters (1, 2, 3)
+drug_sensitivity_cluster <- read.csv("../03.out/figure4/BeatAML_exVivo_Resistant_Sensitive_scaled_scores.csv", header = TRUE, row.names = 1)
+drug_sensitivity_cluster <- drug_sensitivity_cluster[, c("Azacitidine", "Venetoclax", "Cluster")]
+drug_sensitivity_cluster <- gather(drug_sensitivity_cluster, -Cluster, key = "drug", value = "sDSS")
+
+drug_sensitivity_cluster$Cluster <- as.factor(drug_sensitivity_cluster$Cluster)
+
+p2 <- ggplot(drug_sensitivity_cluster, aes(x = Cluster, y = sDSS, color = Cluster)) + 
+  geom_boxplot_jitter() + geom_quasirandom(width = 0.15, alpha = 0.5) +
+  facet_wrap(~drug) + 
+  theme_pubr() + 
+  xlab("") + ylab("Scaled Drug sensitivity (sDSS)") +
+  theme(strip.text.x = element_text(size = 13)) +
+  stat_compare_means(comparisons = list(c('1', '2'), c('1', '3'), c('2', '3')), method = 'wilcox.test', label = "p.signif") + 
+  scale_color_manual(values = c("#e9b383", "#7c9d97", "#9cb0c3")) +  
+  theme(legend.position = 'None')
+
+p2
+```
+

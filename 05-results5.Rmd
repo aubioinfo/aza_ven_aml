@@ -1,0 +1,864 @@
+# Figure 5
+RF8 score correlates with genetic mutations in AML
+
+## Integration with AML genomics
+
+```{r}
+library(tidyverse)
+library(ggpubr)
+library(ggsci)
+library(ggridges)
+library(cowplot)
+library(ggrastr)
+library(readxl)
+library(ggrastr)
+
+# Single mutation
+hcat <- read_xlsx("../03.out/figure5/rjaml_mutations_rf8.xlsx")
+mut_variables <- c("RF8.prob.CR", "TP53",	"ASXL1",	"BCOR",	"BCORL1",
+                   "CBL",	"CEBPA",	"ETV6",	"DDX41",	"DNMT3A",	"EZH2",	
+                   "FLT3-ITD",	"FLT3-TKD",	"IDH1",	"IDH2",	"KRAS",	"NF1","NPM1",
+                   "NRAS",	"PHF6",	"PTPN11",	"RUNX1",	"SF3B1",	"SMC1A",	"SRSF2",
+                   "STAG2",	"TET2",	"U2AF1",	"WT1",	"CBFB::MYH11",	"RUNX1::RUNX1T1"
+)
+hcat <- hcat[, mut_variables]
+
+# Transform data for plotting
+alteration <- hcat %>%
+  gather(-RF8.prob.CR, key='Alteration', value='Status') %>%
+  filter(Status > 0)
+
+p1 <- alteration %>%
+  ggplot(aes(y=fct_reorder(Alteration, RF8.prob.CR), x=RF8.prob.CR, fill=stat(x))) +
+  geom_density_ridges_gradient(
+    jittered_points = TRUE, scale=1.25,
+    position=position_points_jitter(width=0.05, height=0),
+    point_shape='|', point_size=3, point_alpha=0.3) +
+  scale_fill_gradient2(low="grey", high="#9970AB", midpoint=0.5, name="") +
+  theme_pubr() +
+  ylab('') +
+  xlab('RF8 score') +
+  theme(legend.position='right',
+        axis.title.x=element_text(size=15))
+
+p1
+```
+
+## Mutation pairs
+
+```{r}
+## Obtain mutation pairs in AML patients
+library(dplyr)
+library(tidyr)
+library(readr)
+
+combos <- read_xlsx("../03.out/figure5/mutations_pairs_rf8.xlsx") %>% 
+  column_to_rownames(var = "PatientID")
+
+# Select columns that contain 'mut' and replace values
+df <- combos %>%
+  select(contains("mut")) %>%
+  mutate(across(everything(), ~ replace_na(as.character(.), "NA"))) %>%
+  # mutate(across(everything(), ~ recode(., "Positive" = "1", "Negative" = "0", "NA" = "0"))) %>%
+  mutate(across(everything(), as.integer))
+
+# Reorder by frequency and filter rows and columns
+df <- df %>%
+  select(order(colSums(df), decreasing = TRUE)) %>%
+  filter(rowSums(.) >= 2) %>%
+  select(where(~ sum(.) > 1))
+
+# Generate combinations of columns
+combinations <- combn(colnames(df), 2)
+
+# Compute product of column pairs and bind them together
+df_comb <- purrr::map_dfc(seq_len(ncol(combinations)), function(i) {
+  combo <- combinations[, i]
+  col1 <- df[[combo[1]]]
+  col2 <- df[[combo[2]]]
+  setNames(as.data.frame(col1 * col2), paste(combo, collapse = " + "))
+})
+
+row.names(df_comb) <- row.names(df)
+
+# Filter columns by frequency and reset index
+combo2 <- df_comb %>%
+  select(where(~ sum(.) > 1)) %>%
+  rownames_to_column(var = "PatientID")
+# write_csv(combo2, "../03.out/figure5/Two_mutations_combination_riskScore_final.csv",
+#           col_names = TRUE)
+
+combo2 <- combo2 %>% gather(-PatientID, key='Mutation', value='Present') %>%
+  filter(Present > 0) %>%
+  mutate(dnmt3a_dup = if_else((Mutation %>% str_detect("DNMT3A \\(")) & (Mutation %>% str_detect("DNMT3A_mut")), 'TRUE', 'FALSE'),
+         flt3_dup = if_else((Mutation %>% str_detect("FLT3 \\(")) & (Mutation %>% str_detect("FLT3_mut")), 'TRUE', 'FALSE')) %>%
+  filter((dnmt3a_dup == 'FALSE') & (flt3_dup == 'FALSE')) %>%
+  select(-dnmt3a_dup, -flt3_dup) %>%
+  mutate(Mutation = Mutation %>% str_replace_all('_mut', ''))
+
+
+a <- combo2 %>% group_by(Mutation) %>%
+  summarise(Total = sum(Present)) %>%
+  ungroup() %>% arrange(-Total) #%>% head(50)
+a
+
+# write_csv(a, "../03.out/figure5/Two_mutations_combination_Freq_riskScore_final.csv")
+
+## Plot mutation pairs
+dat <- read.csv("../03.out/figure5/Two_mutations_combination_riskScore_final.csv",
+                header = T, check.names = FALSE)
+
+# Initialize empty data frame for statistics
+stat <- data.frame()
+
+# Calculate statistics for each mutation
+for (i in 3:ncol(dat)) {
+  tmp <- dat[, c(2, i)]
+  colnames(tmp)[2] <- "Mutation"
+  
+  tmp_0 <- filter(tmp, Mutation == 0)
+  tmp_1 <- filter(tmp, Mutation == 1)
+  
+  testout <- wilcox.test(tmp_0$RiskScore, tmp_1$RiskScore, alternative = "two.sided")
+  
+  tmp_data <- data.frame(
+    Negative_median = median(tmp_0$RiskScore, na.rm = TRUE),
+    Positive_median = median(tmp_1$RiskScore, na.rm = TRUE),
+    P.value = testout$p.value,
+    Mutation = colnames(dat)[i]
+  )
+  
+  stat <- rbind(stat, tmp_data)
+}
+
+# Load frequency data and merge with statistics
+freq <- read_csv("../03.out/figure5/Two_mutations_combination_Freq_riskScore_final.csv")
+stat <- merge(stat, freq, by = "Mutation")
+# write_csv(stat, "../03.out/figure5/Two_mutations_Mut_vs.WT_stat.csv")
+```
+
+```{r}
+# Plot two mutations
+plot <- read_csv("../03.out/figure5/Two_mutations_Mut_vs.WT_stat.csv") %>%
+  filter(Total >= 5)
+
+mutants <- dat %>%
+  select(RiskScore, all_of(plot$Mutation))
+
+alteration <- mutants %>%
+  gather(key = 'Alteration', value = 'Status', -RiskScore) %>%
+  filter(Status > 0)
+
+p9 <- alteration %>%
+  ggplot(aes(y = fct_reorder(Alteration, RiskScore), x = RiskScore, fill = stat(x))) +
+  geom_density_ridges_gradient(
+    jittered_points = TRUE, scale = 1.25,
+    position = position_points_jitter(width = 0.05, height = 0),
+    point_shape = '|', point_size = 3, point_alpha = 0.3
+  ) +
+  scale_fill_gradient2(low = "#01665E", high = "#8C510A", midpoint = 0.5, name = "") +
+  theme_pubr() +
+  ylab('') +
+  xlab('Risk score') +
+  theme(
+    legend.position = 'right',
+    axis.title.x = element_text(size = 15)
+  )
+
+p9
+```
+
+## Complexheatmap for mutation
+
+```{r}
+library(ComplexHeatmap)
+library(circlize)
+library(dplyr)
+library(readxl)
+library(RColorBrewer)
+data <- read_xlsx("../03.out/figure5/rjaml_mutations_rf8.xlsx")
+# Define clinical and mutation variables
+clinic_variables <- c("PatientID", "Group", "Age", "BM_blast", "Gender", 
+                      "Secondary_AML", "Complex_Karyotype", "ELN")
+mut_variables <- c("PatientID", "Group", "TP53",	"ASXL1",	"BCOR",	"BCORL1",
+                   "CBL",	"CEBPA",	"ETV6",	"DDX41",	"DNMT3A",	"EZH2",	
+                   "FLT3-ITD",	"FLT3-TKD",	"IDH1",	"IDH2",	"KRAS",	"NF1","NPM1",
+                   "NRAS",	"PHF6",	"PTPN11",	"RUNX1",	"SF3B1",	"SMC1A",	"SRSF2",
+                   "STAG2",	"TET2",	"U2AF1",	"WT1",	"CBFB::MYH11",	"RUNX1::RUNX1T1"
+)
+
+# Extract clinical and mutation data
+clinical_data <- data[, clinic_variables]
+mutation_data <- data[, mut_variables]
+
+# Set PatientID as row names and remove from both mutation and clinical data
+rownames(mutation_data) <- mutation_data$PatientID
+mutation_data <- mutation_data[, -1]  # Remove PatientID column from mutation data
+
+rownames(clinical_data) <- clinical_data$PatientID
+clinical_data <- clinical_data[, -1]  # Remove PatientID column from clinical data
+
+# Extract mutation matrix and transpose it
+mutation_matrix <- mutation_data[, -1]  # Remove Response column
+mutation_binary <- apply(mutation_matrix, 2, function(x) ifelse(x == 1, "Mutation", ""))
+mutation_binary_transposed <- t(mutation_binary)
+
+# Define custom colors for clinical variables
+col_age <- colorRamp2(c(40, 80), c("#F7F7F7", "#E69F00"))
+col_blast <- colorRamp2(c(20, 100), c("#F7F7F7", "#56B4E9"))
+
+clinical_annotation <- HeatmapAnnotation(
+  Group = clinical_data$Group,
+  Age = clinical_data$Age,
+  BM_blast = clinical_data$BM_blast,
+  Gender = clinical_data$Gender,
+  Secondary_AML = clinical_data$Secondary_AML, 
+  Complex_Karyotype = clinical_data$Complex_Karyotype, 
+  ELN = clinical_data$ELN, 
+  show_annotation_name = TRUE,
+  col = list(
+    Age = col_age,
+    BM_blast = col_blast,
+    Gender = c("0" = "#F0E442", "1" = "#0072B2"),
+    Secondary_AML = c("0" = "#56B4E9", "1" = "#E69F00"),
+    Complex_Karyotype = c("0" = "#999999", "1" = "#D55E00"),
+    ELN = c("Favorable" = "#7c9d97", "Intermediate" = "#9cb0c3", "Adverse" = "#e9b383"),
+    Group = c("High" = "#7c9d97", "Low" = "#e9b383")
+  )
+)
+
+# Define alteration function
+alter_fun <- list(
+  background = function(x, y, w, h) {
+    grid.rect(x, y, w - unit(0.5, "mm"), h - unit(1, "mm"), gp = gpar(fill = '#ebebe1ff', col = NA))
+  }, 
+  Mutation = function(x, y, w, h) {
+    grid.rect(x, y, w - unit(0.5, "mm"), h - unit(1, "mm"), gp = gpar(fill = "#377EB8", col = NA))  # Mutation = Dark Blue
+  }
+)
+
+# Color function for mutation heatmap
+col <- c("Mutation" = "#377EB8")
+
+# Generate oncoPrint heatmap
+# pdf("../03.out/figure5/03.oncoplot_map.pdf", width = 16, height = 9.5)
+oncoPrint(
+  mutation_binary_transposed,
+  alter_fun = alter_fun,
+  col = col,
+  column_split = clinical_data$Group,  # Split columns by Response (CR/CRi vs Non-CR/CRi)
+  bottom_annotation = clinical_annotation,  # Add clinical annotations to the heatmap
+  show_column_names = TRUE,
+  show_row_names = TRUE,
+  heatmap_legend_param = list(title = "Alterations")
+)
+# dev.off()
+
+```
+
+## Fisher test
+
+```{r}
+library(tidyverse)
+library(ggplot2)
+library(ggsci)
+library(scales)
+library(ggbreak)
+
+# Read input data
+fisher.dat <- read_xlsx("../03.out/figure5/rjaml_mutations_rf8.xlsx")
+mut_variables <- c("RF8.prob.CR", "TP53",	"ASXL1",	"BCOR",	"BCORL1",
+                   "CBL",	"CEBPA",	"ETV6",	"DDX41",	"DNMT3A",	"EZH2",	
+                   "FLT3-ITD",	"FLT3-TKD",	"IDH1",	"IDH2",	"KRAS",	"NF1","NPM1",
+                   "NRAS",	"PHF6",	"PTPN11",	"RUNX1",	"SF3B1",	"SMC1A",	"SRSF2",
+                   "STAG2",	"TET2",	"U2AF1",	"WT1",	"CBFB::MYH11",	"RUNX1::RUNX1T1"
+)
+fisher.dat <- fisher.dat[, mut_variables]
+# Set options
+options(scipen = 100)
+
+# Initialize matrix to store Fisher test results
+stat1 <- matrix(NA, nrow = ncol(fisher.dat) - 1, ncol = 4)
+
+# Perform Fisher test for each column (gene)
+for (i in 2:ncol(fisher.dat)) {
+  m1 <- fisher.dat[, c(1, i)]
+  m1 <- m1[complete.cases(m1), ]
+  m1$RF8.prob.CR <- ifelse(m1$RF8.prob.CR >= median(m1$RF8.prob.CR), "High", "Low")
+  
+  # Create contingency table
+  m2 <- table(m1)
+  m3 <- matrix(c(m2[1], m2[2], m2[3], m2[4]), ncol = 2, nrow = 2)
+  
+  # Perform Fisher test
+  s1 <- fisher.test(m3)
+  
+  # Store results
+  stat1[i - 1, ] <- c(round(s1$p.value, 5), as.numeric(round(s1$estimate, 3)), round(s1$conf.int[1], 3), round(s1$conf.int[2], 3))
+}
+
+# Convert results to data frame and add gene names
+stat1 <- data.frame(stat1)
+stat1$Gene <- colnames(fisher.dat)[2:ncol(fisher.dat)]
+colnames(stat1) <- c("P.value", "Odds_Ratio", "Lower95%", "Upper95%", "Gene")
+
+# Reorder columns and sort by p-value
+stat <- stat1[, c("Gene", "P.value", "Odds_Ratio", "Lower95%", "Upper95%")]
+stat <- stat[order(stat$P.value), ]
+
+# write.csv(stat, "../03.out/figure5/Mutation_fisher_out.csv")
+
+```
+
+```{r}
+###################################
+######  dotplot Fisher test  ######
+###################################
+
+# Read results data
+tab <- read.csv("../03.out/figure5/Mutation_fisher_out.csv", header = TRUE, row.names = 1, check.names = FALSE)
+
+# Subset data for significant results
+tab <- subset(tab, P.value < 0.05)
+tab <- tab[order(tab$Odds_Ratio, decreasing = TRUE), ]
+# Order genes by odds ratio
+tab$Gene <- factor(tab$Gene, levels = rev(tab$Gene))
+
+# Create dot plot
+forest <- ggplot(data = tab, aes(x = Odds_Ratio, y = Gene)) +
+  geom_point(aes(color = -log2(P.value), size = 0.75), shape = 19) +
+  geom_errorbarh(aes(xmin = `Lower95%`, xmax = `Upper95%`), height = 0, color = "black") +
+  geom_vline(xintercept = 1, linetype = "dashed", color = "black") +
+  theme_classic() +
+  labs(x = "Odds Ratio (OR)", y = "") +
+  theme(
+    legend.position = "right",
+    legend.title = element_blank(),
+    axis.text.x = element_text(angle = 0, hjust = 1, color = "black"),
+    panel.grid.major = element_line(size = 0.1, linetype = "dashed", color = "grey"),
+    panel.grid.minor = element_line(size = 0.1, linetype = "dashed", color = "grey")
+  )
+
+# Customize plot color and scale
+p2 <- forest + scale_color_gradient2(low = "white", mid = "white", high = "#0072B5FF") + scale_x_log10()
+
+p2
+
+```
+
+## Barplot in RJAML cohort
+
+```{r, fig.width=8}
+library(ggstatsplot)
+library(patchwork)
+data <- read_xlsx("../03.out/figure5/rjaml_mutations_rf8.xlsx")
+
+p1 <- ggbarstats(data = data, x = TP53, y = Group)
+p2 <- ggbarstats(data = data, x = DNMT3A, y = Group)
+p3 <- ggbarstats(data = data, x = IDH2, y = Group)
+p4 <- ggbarstats(data = data, x = CEBPA, y = Group)
+plots <- p1|p2|p3|p4
+plots
+```
+
+## Table one for multi-cohorts
+
+```{r}
+####################################
+### Table one for multi-cohorts
+####################################
+library(tableone)
+data <- read.csv("../03.out/figure5/multi-cohorts_4gene_Clinicaldata.csv",
+                 header = T, check.names = FALSE)
+myVars <- c("Age", "Gender", "Secondary_AML", "Complex_Karyotype", 
+            "FLT3-ITD", "NPM1", "KRAS", "NRAS", "CEBPA", "DNMT3A",
+            "IDH2", "TP53")
+catVars <- c("Gender", "Secondary_AML", "Complex_Karyotype",
+             "FLT3-ITD", "NPM1", "KRAS", "NRAS", "CEBPA", "DNMT3A",
+             "IDH2", "TP53")
+
+tab <- CreateTableOne(vars = myVars, strata = c("Response_group", "Cohort"),
+                      addOverall = TRUE, data = data, factorVars = catVars)
+tab2 <- print(tab, showAllLevels = TRUE)
+# write.csv(tab2, file = "../03.out/figure5/multi-cohorts_4gene_Clinicaldata_out.csv")
+
+```
+
+## Barplot for real response
+
+```{r, fig.width=10}
+library(ggstatsplot)
+library(patchwork)
+dat <- read.csv("../03.out/figure5/multi-cohorts_4gene_data.csv", header = TRUE)
+p1 <- ggbarstats(dat, y = TP53, x = Response_group, palette = "Paired", label = "counts")
+p2 <- ggbarstats(dat, y = DNMT3A, x = Response_group, palette = "Paired", label = "counts")
+p3 <- ggbarstats(dat, y = IDH2, x = Response_group, palette = "Paired", label = "counts")
+p4 <- ggbarstats(dat, y = CEBPA, x = Response_group, palette = "Paired", label = "counts")
+
+plots <- p1|p2|p3|p4
+plots
+```
+
+## Multivariable LogisticReg
+
+```{r}
+library(forestmodel)
+library(ggplot2)
+library(ggsci)
+library(scales)
+library(ggbreak)
+
+#---------------------
+# Load the Data
+#---------------------
+dat <- read_xlsx("../03.out/figure5/rjaml_mutations_rf8.xlsx")
+dat$Response <- ifelse(dat$Response == 'NonCR', 1, 0)
+dat$ELN <- ifelse(dat$ELN == "Adverse", 1, 0)
+# Define forest plot panels
+forest.panels <- list(
+  list(width = 0.01),
+  list(width = 0.1, display = ~variable, fontface = "bold", heading = "Variable"),
+  list(width = 0.1, display = ~level),
+  list(width = 0.05, display = ~n, hjust = 1, heading = "N"),
+  list(width = 0.03, item = "vline", hjust = 0.5),
+  list(width = 0.55, item = "forest", hjust = 0.5, heading = "Odds ratio", linetype = "dashed", line_x = 0),
+  list(width = 0.03, item = "vline", hjust = 0.5),
+  list(width = 0.12, display = ~ ifelse(reference, "Reference", sprintf("%0.3f (%0.3f, %0.3f)", trans(estimate), trans(conf.low), trans(conf.high))), display_na = NA),
+  list(width = 0.03, display = ~ ifelse(reference, "", format.pval(p.value, digits = 1, eps = 0.001)), display_na = NA, hjust = 1, heading = "p"),
+  list(width = 0.03)
+)
+
+# Define function to create forest plots
+create_forest_plot <- function(data) {
+  formula <- as.formula(paste0('Response ~ ', paste(c('RF8.prob.CR', 'Age', 'Gender', 'BM_blast',	'Secondary_AML',	'Complex_Karyotype', 'ELN', 'TP53', 'IDH2', 'DNMT3A', 'CEBPA'), collapse = ' + ')))
+  model <- glm(formula, data = data, family = binomial)
+  print(forest_model(model, panels = forest.panels, factor_separate_line = FALSE))
+}
+
+create_forest_plot(dat)
+```
+
+## Identification of RF8-correlated genes
+
+```{r}
+# library(dplyr)
+# library(DESeq2)
+# source("RunDESeq2.R")
+# 
+# # Load TPM and raw count data
+# tpm <- read.table("../02.data/ID_matched_TPM_matrix.txt", header = TRUE, check.names = FALSE)
+# sample_info <- read.csv("D:\\01.Projects\\01.project\\35_AZA_VEN\\00.RNAseq_Model\\figure3\\rjaml_rf8_scores.csv", header = TRUE, check.names = FALSE)
+# tpm <- tpm[, c("ID", "Symbol", "Type", as.character(sample_info$PatientID))]
+# 
+# tpm <- subset(tpm, Type %in% c("protein_coding", "miRNA", "lincRNA", "antisense",
+#                                "processed_transcript",
+#                                "transcribed_processed_pseudogene", "transcribed_unitary_pseudogene",
+#                                "transcribed_unprocessed_pseudogene","macro_lncRNA", "TEC",
+#                                "3prime_overlapping_ncRNA","sense_intronic", "sense_overlapping",
+#                                "unprocessed_pseudogene"))
+# 
+# tpm <- tpm[which(rowMeans(tpm[, -c(1:3)]) > 0.5), ]
+# tpm <- tpm[!duplicated(tpm$Symbol), ]
+# row.names(tpm) <- tpm$Symbol
+# tpm <- tpm[, -c(1:3)]
+# tpm <- data.frame(t(tpm))
+# tpm <- log2(tpm + 1)
+# 
+# dat <- cbind(sample_info$RF8, tpm)
+# colnames(dat)[1] <- "RF8"
+# 
+# ## Define a dataframe to store the results
+# 
+# stat1 <- data.frame(matrix(NA, nrow = (ncol(dat)-1), ncol = 3))
+# stat1[, 1] <- colnames(dat)[2:ncol(dat)]
+# 
+# for (i in 2:ncol(dat)) {
+#   res <- cor.test(dat[,1], dat[,i], method = "pearson")
+#   stat1[i-1, 2] <- res$p.value
+#   stat1[i-1, 3] <- res$estimate
+# }
+# 
+# colnames(stat1) <- c("ID", "P.value", "rho")
+# stat1$fdr <- p.adjust(stat1$P.value, method ="BH")
+# 
+# write.csv(stat1, "../03.out/figure5/RF8_correlatedGenes.csv")
+```
+
+```{r}
+library(ggplot2)
+library(ggrepel)
+library(ggrastr)
+library(viridis)   
+
+stat1 <- read.csv("../03.out/figure5/RF8_correlatedGenes.csv", header = T)
+stat1$rank_score <- -log2(stat1$P.value) * abs(stat1$rho)
+dat <- stat1[order(stat1$rank_score, decreasing = TRUE), ]
+dat$Rank <- 1:nrow(stat1)
+dat1 <- head(dat, 20)
+
+# Sort data by rank_score and find the top 500 threshold
+top_1000_threshold <- dat$rank_score[order(dat$rank_score, decreasing = TRUE)][1000]
+
+# Plotting
+p <- ggplot(dat, aes(x = Rank, y = rank_score, color = rank_score)) +
+  geom_point_rast(aes(size = abs(rank_score)), alpha = 0.8, raster.dpi = 350, stroke = 0) +
+  scale_color_viridis(option = "plasma", direction = -1, name = "Rank Score") +
+  labs(x = "Rank", y = "Rank score") +
+  theme_classic(base_size = 14) +
+  theme(
+    legend.position = "right",
+    legend.title = element_text(size = 12, face = "bold"),
+    legend.text = element_text(size = 10),
+    panel.grid.major = element_line(size = 0.2, linetype = "dashed", color = "grey"),
+    panel.grid.minor = element_blank(),
+    plot.title = element_text(size = 16, face = "bold", hjust = 0.5)
+  ) +
+  geom_hline(yintercept = top_1000_threshold, color = "red", linetype = "dotted", lwd = 0.8) +
+  annotate("text", x = max(dat$Rank) * 0.95, y = top_1000_threshold, label = paste0("Top 1000 Genes (", round(top_1000_threshold, 2), ")"),
+           vjust = -0.5, hjust = 1, color = "red", fontface = "bold", size = 4) +
+  scale_size_continuous(range = c(2, 6)) # Adjust point size range for better visibility
+
+# Adding highlighted points and labels
+p1 <- p +
+  geom_point(data = dat1, aes(size = abs(rank_score)), shape = 21, stroke = 1.5, color = "black", fill = "white") +
+  geom_label_repel(data = dat1, aes(label = ID), color = "black", 
+                   box.padding = unit(0.4, "lines"), point.padding = unit(0.5, "lines"),
+                   max.overlaps = 100, segment.color = "grey50", size = 4, fontface = "bold", fill = "lightyellow")
+
+p1
+
+```
+
+## Differential Expression Analysis for Mut vs. WT
+
+```{r}
+##########################################################################
+### Differential Expression Analysis for Mut vs. WT
+##########################################################################
+
+# # Filter data for relevant samples
+# source("RunDESeq2.R")
+# mat <- read.table("../02.data/ID_matched_count_matrix.txt", header = T, row.names = 1)
+# mat <- mat[, -c(1:2)]
+# tpm <- read.table("../02.data/ID_matched_TPM_matrix.txt", header = TRUE, check.names = FALSE)
+# sample_info <- read.csv("../02.data/rjaml_rf8_scores.csv", header = TRUE, check.names = FALSE)
+# tpm <- tpm[, c("ID", "Symbol", "Type", as.character(sample_info$PatientID))]
+# 
+# tpm <- subset(tpm, Type %in% c("protein_coding", "miRNA", "lincRNA", "antisense",
+#                                "processed_transcript",
+#                                "transcribed_processed_pseudogene", "transcribed_unitary_pseudogene",
+#                                "transcribed_unprocessed_pseudogene","macro_lncRNA", "TEC",
+#                                "3prime_overlapping_ncRNA","sense_intronic", "sense_overlapping",
+#                                "unprocessed_pseudogene"))
+# 
+# tpm <- tpm[which(rowMeans(tpm[, -c(1:3)]) > 0.5), ]
+# tpm <- tpm[!duplicated(tpm$Symbol), ]
+# 
+# ### TP53 Mutation vs. WT
+# sample_info <- sample_info[order(sample_info$TP53), ]
+# table(sample_info$TP53)
+# 
+# mat <- mat[tpm$ID, sample_info$PatientID]
+# tpm <- tpm[, c("ID", "Symbol", "Type", as.character(sample_info$PatientID))]
+# # Run DESeq2 analysis
+# RunDESeq2(count_mat = mat, n.cont = 100, n.treat = 10,
+#           prefix = "../03.out/figure5/DESeq2_out_TP53_Mut_WT",
+#           sort.p = FALSE,
+#           merge.normalized = TRUE,
+#           normalized_mat = tpm)
+# 
+# ### DNMT3A Mutation vs. WT
+# sample_info <- sample_info[order(sample_info$DNMT3A), ]
+# table(sample_info$DNMT3A)
+# 
+# mat <- mat[tpm$ID, sample_info$PatientID]
+# tpm <- tpm[, c("ID", "Symbol", "Type", as.character(sample_info$PatientID))]
+# # Run DESeq2 analysis
+# RunDESeq2(count_mat = mat, n.cont = 83, n.treat = 27,
+#           prefix = "../03.out/figure5/DESeq2_out_DNMT3A_Mut_WT",
+#           sort.p = FALSE,
+#           merge.normalized = TRUE,
+#           normalized_mat = tpm)
+# 
+# ### IDH2 Mutation vs. WT
+# sample_info <- sample_info[order(sample_info$IDH2), ]
+# table(sample_info$IDH2)
+# 
+# mat <- mat[tpm$ID, sample_info$PatientID]
+# tpm <- tpm[, c("ID", "Symbol", "Type", as.character(sample_info$PatientID))]
+# # Run DESeq2 analysis
+# RunDESeq2(count_mat = mat, n.cont = 84, n.treat = 26,
+#           prefix = "../03.out/figure5/DESeq2_out_IDH2_Mut_WT",
+#           sort.p = FALSE,
+#           merge.normalized = TRUE,
+#           normalized_mat = tpm)
+# 
+# ### CEBPA Mutation vs. WT
+# sample_info <- sample_info[order(sample_info$CEBPA), ]
+# table(sample_info$CEBPA)
+# 
+# mat <- mat[tpm$ID, sample_info$PatientID]
+# tpm <- tpm[, c("ID", "Symbol", "Type", as.character(sample_info$PatientID))]
+# # Run DESeq2 analysis
+# RunDESeq2(count_mat = mat, n.cont = 100, n.treat = 10,
+#           prefix = "../03.out/figure5/DESeq2_out_CEBPA_Mut_WT",
+#           sort.p = FALSE,
+#           merge.normalized = TRUE,
+#           normalized_mat = tpm)
+```
+
+```{r}
+library(patchwork)
+source("plotVolcanoV3.R")
+
+##### TP53
+de_results <- read.table("../03.out/figure5/DESeq2_out_TP53_Mut_WT_with_normalized_mat.txt", header = TRUE)
+de_results_filtered <- de_results[, 1:9]
+degs_tp53 <- subset(de_results_filtered, abs(log2FoldChange) > 0.25 & padj < 0.05)
+
+# Cap extreme values
+de_results_filtered$log2FoldChange[de_results_filtered$log2FoldChange < -5] <- -5
+de_results_filtered$log2FoldChange[de_results_filtered$log2FoldChange > 5] <- 5
+de_results_filtered$padj[de_results_filtered$padj < 1e-6] <- 1e-6
+
+# Generate volcano plot
+volcano_plot1 <- plotVolcano(mat = de_results_filtered, gene.col = "Symbol", x.col = "log2FoldChange", y.col = "padj", 
+                            labx = "log2FoldChange", laby = "-Log10FDR",
+                            x_cut1 = 0.5, x_cut2 = 1, y_cut1 = 0.05, y_cut2 = 0.01, x.lim = 5, y.lim = 6, 
+                            label = FALSE, title = "TP53 (Mut vs. WT)", selected_genes = "NA") + theme_classic()
+
+
+##### DNMT3A
+de_results <- read.table("../03.out/figure5/DESeq2_out_DNMT3A_Mut_WT_with_normalized_mat.txt", header = TRUE)
+de_results_filtered <- de_results[, 1:9]
+degs_dnmt3a <- subset(de_results_filtered, abs(log2FoldChange) > 0.25 & padj < 0.05)
+
+# Cap extreme values
+de_results_filtered$log2FoldChange[de_results_filtered$log2FoldChange < -4] <- -4
+de_results_filtered$log2FoldChange[de_results_filtered$log2FoldChange > 4] <- 4
+de_results_filtered$padj[de_results_filtered$padj < 1e-6] <- 1e-6
+
+# Generate volcano plot
+volcano_plot2 <- plotVolcano(mat = de_results_filtered, gene.col = "Symbol", x.col = "log2FoldChange", y.col = "padj", 
+                            labx = "log2FoldChange", laby = "-Log10FDR",
+                            x_cut1 = 0.5, x_cut2 = 1, y_cut1 = 0.05, y_cut2 = 0.01, x.lim = 4, y.lim = 6, 
+                            label = FALSE, title = "DNMT3A (Mut vs. WT)", selected_genes = "NA") + theme_classic()
+
+##### IDH2
+de_results <- read.table("../03.out/figure5/DESeq2_out_IDH2_Mut_WT_with_normalized_mat.txt", header = TRUE)
+de_results_filtered <- de_results[, 1:9]
+degs_idh2 <- subset(de_results_filtered, abs(log2FoldChange) > 0.25 & padj < 0.05)
+
+# Cap extreme values
+de_results_filtered$log2FoldChange[de_results_filtered$log2FoldChange < -4] <- -4
+de_results_filtered$log2FoldChange[de_results_filtered$log2FoldChange > 4] <- 4
+de_results_filtered$padj[de_results_filtered$padj < 1e-4] <- 1e-4
+
+# Generate volcano plot
+volcano_plot3 <- plotVolcano(mat = de_results_filtered, gene.col = "Symbol", x.col = "log2FoldChange", y.col = "padj", 
+                             labx = "log2FoldChange", laby = "-Log10FDR",
+                             x_cut1 = 0.5, x_cut2 = 1, y_cut1 = 0.05, y_cut2 = 0.01, x.lim = 4, y.lim = 4, 
+                             label = FALSE, title = "IDH2 (Mut vs. WT)", selected_genes = "NA") + theme_classic()
+
+##### CEBPA
+de_results <- read.table("../03.out/figure5/DESeq2_out_CEBPA_Mut_WT_with_normalized_mat.txt", header = TRUE)
+de_results_filtered <- de_results[, 1:9]
+degs_cebpa <- subset(de_results_filtered, abs(log2FoldChange) > 0.25 & padj < 0.05)
+
+# Cap extreme values
+de_results_filtered$log2FoldChange[de_results_filtered$log2FoldChange < -5] <- -5
+de_results_filtered$log2FoldChange[de_results_filtered$log2FoldChange > 5] <- 5
+de_results_filtered$padj[de_results_filtered$padj < 1e-6] <- 1e-6
+
+# Generate volcano plot
+volcano_plot4 <- plotVolcano(mat = de_results_filtered, gene.col = "Symbol", x.col = "log2FoldChange", y.col = "padj", 
+                             labx = "log2FoldChange", laby = "-Log10FDR",
+                             x_cut1 = 0.5, x_cut2 = 1, y_cut1 = 0.05, y_cut2 = 0.01, x.lim = 4, y.lim = 4, 
+                             label = FALSE, title = "CEBPA (Mut vs. WT)", selected_genes = "NA") + theme_classic()
+
+plots <- volcano_plot1|volcano_plot2|volcano_plot3|volcano_plot4
+plots
+# Save volcano plot
+# ggsave(plots, filename = "../03.out/figure5/DESeq2_valcanoplot.pdf", width = 12, height = 3)
+```
+
+## Venn Diagram for target genes
+
+```{r}
+library(ggVennDiagram)
+
+stat1 <- read.csv("../03.out/figure5/RF8_correlatedGenes.csv", header = T)
+stat1$rank_score <- -log2(stat1$P.value) * abs(stat1$rho)
+stat1 <- stat1[order(stat1$rank_score, decreasing = TRUE), ]
+rf8_genes <- head(stat1, n=1000)
+
+# Example Venn plot for 5 sets
+venn_plot <- ggVennDiagram(
+  x = list(
+    "RF8-genes" = rf8_genes$ID,
+    "TP53 mutation" = degs_tp53$Symbol,
+    "DNMT3A mutation" = degs_dnmt3a$Symbol,
+    "IDH2 mutation" = degs_idh2$Symbol,
+    "CEBPA mutation" = degs_cebpa$Symbol
+  ),
+  label_alpha = 0.5,
+  edge_size = 0.5,
+  label = "count"
+) + 
+  ggtitle("Intersection of Gene Sets") +
+  theme(legend.position = "none")
+
+venn_plot
+
+# Save each gene list to a CSV file
+write.csv(degs_tp53$Symbol, "../03.out/figure5/TP53_genes.csv", row.names = FALSE)
+write.csv(degs_dnmt3a$Symbol, "../03.out/figure5/DNMT3A_genes.csv", row.names = FALSE)
+write.csv(degs_idh2$Symbol, "../03.out/figure5/IDH2_genes.csv", row.names = FALSE)
+write.csv(degs_cebpa$Symbol, "../03.out/figure5/CEBPA_genes.csv", row.names = FALSE)
+
+```
+
+## Pathway overlap analysis of genes 
+
+```{r}
+library(clusterProfiler)
+library(org.Hs.eg.db)
+library(dplyr)
+library(ggpubr)
+library(patchwork)
+
+set.seed(123456)
+# Define your gene lists
+genes <- list(
+  RF8_gene = rf8_genes$ID,
+  TP53_gene = degs_tp53$Symbol,
+  DNMT3A_gene = degs_dnmt3a$Symbol,
+  IDH2_gene = degs_idh2$Symbol,
+  CEBPA_gene = degs_cebpa$Symbol
+)
+
+# Map gene symbols to ENTREZ IDs
+genes <- lapply(genes, function(gene_set) {
+  mapIds(
+    org.Hs.eg.db,
+    keys = gene_set,
+    column = "ENTREZID",
+    keytype = "SYMBOL",
+    multiVals = "first"
+  ) %>% na.omit() %>% unique()
+})
+
+# Obtain all gene-pathway associations from the database
+all_pathway_genes <- AnnotationDbi::select(
+  org.Hs.eg.db, 
+  keys = keys(org.Hs.eg.db, "GO"), 
+  columns = c("ENTREZID", "GO", "ONTOLOGY"), 
+  keytype = "GO"
+) %>% filter(!is.na(GO))
+
+# Calculate total gene counts per pathway and filter for at least 5 genes
+total_genes_per_pathway <- all_pathway_genes %>%
+  group_by(GO) %>%
+  summarize(Total_Genes = n_distinct(ENTREZID)) %>%
+  filter(Total_Genes >= 5)
+
+# Function to calculate overlap ratio for each gene list
+calculate_overlap_ratio <- function(gene_list, pathway_genes, total_counts) {
+  pathway_overlap <- pathway_genes %>%
+    filter(ENTREZID %in% gene_list) %>%
+    group_by(GO, ONTOLOGY) %>%
+    summarize(Overlap_Count = n_distinct(ENTREZID), .groups = "drop") %>%
+    left_join(total_counts, by = "GO") %>%
+    mutate(Overlap_Ratio = Overlap_Count / Total_Genes) %>%
+    arrange(desc(Overlap_Ratio))
+  
+  # Convert to data frame to avoid issues with tibble
+  pathway_overlap <- as.data.frame(pathway_overlap)
+  
+  return(pathway_overlap)
+}
+
+# Calculate overlap ratios for each gene list
+overlap_results <- lapply(names(genes), function(list_name) {
+  overlap_data <- calculate_overlap_ratio(genes[[list_name]], all_pathway_genes, total_genes_per_pathway)
+  
+  # Safely select and rename columns
+  overlap_data <- overlap_data[, c("GO", "Overlap_Ratio")]
+  colnames(overlap_data)[2] <- list_name  # Dynamically assign the new column name
+  
+  return(overlap_data)
+})
+
+
+# Combine results from all gene lists into a single data frame
+combined_overlap_results <- Reduce(function(x, y) merge(x, y, by = "GO", all = TRUE), overlap_results)
+
+# Save the results as a CSV file
+# write.csv(combined_overlap_results, "../03.out/figure5/pathway_overlap_analysis_result.csv", row.names = FALSE)
+
+# Scatter plot function
+plot_scatter <- function(data, x_col, y_col, color, x_label, y_label) {
+  ggscatter(
+    data = data,
+    x = x_col,
+    y = y_col,
+    add = "reg.line",                      # Add regression line
+    conf.int = TRUE,                       # Add confidence interval
+    add.params = list(color = "black", fill = "lightgray"), # Regression line params
+    color = color,                         # Scatter point color
+    size = 2                               # Point size
+  ) +
+    stat_cor(method = "pearson") +
+    labs(x = x_label, y = y_label) +       # Axis labels
+    theme_classic() +                      # Use a classic theme
+    theme(
+      strip.text = element_text(size = 12, face = "bold"),  # Customize facet labels
+      plot.title = element_text(hjust = 0.5, face = "bold"),# Center-align title
+      # plot.margin = margin(5, 5, 5, 5),                    # Reduce plot margins
+      panel.spacing = unit(0.5, "lines")                   # Reduce spacing between facets
+    )
+}
+
+# Scatter plots between different gene overlap ratios
+p1 <- plot_scatter(combined_overlap_results, "TP53_gene", "RF8_gene", "#1B9E77",
+                   "% Pathway Overlap \n(TP53 mutation-affected genes)", 
+                   "% Pathway Overlap (RF8-correlated genes)")
+
+p2 <- plot_scatter(combined_overlap_results, "DNMT3A_gene", "RF8_gene", "#D95F02",
+                   "% Pathway Overlap \n(DNMT3A mutation-affected genes)", 
+                   "% Pathway Overlap (RF8-correlated genes)")
+
+p3 <- plot_scatter(combined_overlap_results, "IDH2_gene", "RF8_gene", "#7570B3",
+                   "% Pathway Overlap \n(IDH2 mutation-affected genes)", 
+                   "% Pathway Overlap (RF8-correlated genes)")
+
+p4 <- plot_scatter(combined_overlap_results, "CEBPA_gene", "RF8_gene", "#E6AB02",
+                   "% Pathway Overlap \n(CEBPA mutation-affected genes)", 
+                   "% Pathway Overlap (RF8-correlated genes)")
+
+# Combine plots using patchwork
+plots <- (p1 | p2) / (p3 | p4)
+plots
+```
+
+```{r}
+library(ggcorrplot)
+# Prepare the correlation matrix from the combined_overlap_results
+cor_matrix <- cor(combined_overlap_results[,-1], use = "pairwise.complete.obs")
+
+# Plot the correlation heatmap
+p <- ggcorrplot(
+  cor_matrix,
+  method = "circle",       # Use circle style for visualization
+  type = "upper",          # Show only the upper triangle
+  lab = TRUE,              # Add correlation coefficient labels
+  lab_size = 4,            # Label size
+  colors = c("#6D9EC1", "white", "#E46726"),  # Color gradient (blue-white-red)
+  title = "Correlation of Pathway Overlap Ratios",
+  outline.color = "black"  # Outline color for circles
+)
+
+p
+
+```
+

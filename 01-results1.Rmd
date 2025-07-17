@@ -1,0 +1,470 @@
+# Figure 1
+Ex vivo drug sensitivity and transcriptomic profiling reveal distinct molecular features associated with venetoclax-azacitidine response
+
+## Process the data from Functional_Precision_Medicine_Tumor_Board_AML
+
+```{r eval=TRUE, message = FALSE, warning = FALSE}
+## Normalize raw counts into TPM
+# count <- read.csv("../02.data/File_8_RNA_seq_Raw_Reads_163S_4Healthy.csv", header = T)
+# colnames(count)[1] <- "id2"
+# length <- read.csv("../02.data/gencode.v22_geneLength.csv", header = T)
+# count <- merge(length, count, by = "id2")
+# row.names(count) <- count$id2
+# count <- count[, -c(1:5)]
+# 
+# row.names(length) <- length$id2
+# length <- length[row.names(count), ]
+# Length <- as.vector(length$length)
+# TPM <- t(t(count / t(Length)) * 1e6 / colSums(count / t(Length)))
+# tpm <- cbind(length, TPM)
+# tpm <- tpm[, -c(1:3)]
+# #write.csv(tpm, "../02.data/File_8_RNA_seq_TPM_163S_4Healthy.csv")
+# 
+# ## load the drug profiling data
+# library(readxl)
+# drug <- read.csv("../02.data/File_3_Drug_response_sDSS_164S_17Healthy.csv", header =TRUE, check.names = FALSE)
+# ## overlapped samples profiled by RNA-seq and Drug profiling
+# samples <- intersect(colnames(tpm), colnames(drug))
+# tpm <- tpm[, c("Symbol", "Type", samples)]
+# drug <- drug[, c("Drug_name", samples)]
+```
+
+## Functional_Precision_Medicine_Tumor_Board_AML
+
+```{r eval=TRUE, message = FALSE, warning = FALSE}
+library(pheatmap)
+func_drug <- read.csv("../02.data/File_3_Drug_response_sDSS_164S_17Healthy.csv", header = T)
+func_drug <- subset(func_drug, Drug_name %in% c("Azacitidine", "Venetoclax"))
+sampleid <- read.csv("../02.data/Functional_Precision_Medicine_RNAseq_samples.csv", header = T) # AML sample ids
+over_id <- data.frame(intersect(colnames(func_drug), sampleid$sample))
+colnames(over_id) <- "sample"
+func_drug <- func_drug[, c("Drug_name", as.character(over_id$sample))]
+row.names(func_drug) <- func_drug$Drug_name
+func_drug <- func_drug[, -1]
+func_drug <- func_drug[, colSums(is.na(func_drug)) == 0]
+
+#### heatmap
+core_mat <- func_drug
+core_mat1 <- as.matrix(core_mat)
+bk <- unique(c(seq(-2,2, length=100)))
+out <- pheatmap(
+    core_mat1,
+    cutree_cols = 2,
+    color = colorRampPalette(c("#4292C6", "#F0F0F0", "#A50F15"))(100),
+    scale = "row",
+    border_color = "black",
+    angle_col = "90",  # Column label angle (must be character)
+    show_rownames = TRUE,
+    show_colnames = FALSE,
+    na_col = "grey",  # Color for NA values (instead of na.rm)
+    clustering_method = "ward.D2",
+    cluster_cols = TRUE,
+    cluster_rows = TRUE
+)
+
+
+col_cluster <- cutree(out$tree_col, k=2)
+
+newOrder <- core_mat1[,out$tree_col$order]
+newOrder <- t(newOrder)
+# write.csv(newOrder, "../03.out/figure1/02.FPMTB_exVivo_Resistant_Sensitive_HeatmapOrder.csv")
+
+# Order of clustered samples
+clust_sample <- colnames(core_mat1[, out$tree_col[["order"]]])
+clust_sample <- data.frame(clust_sample)
+sample_cluster <- data.frame(cutree(out$tree_col, k=2))
+colnames(sample_cluster) <- "Cluster"
+data <- cbind(t(core_mat), sample_cluster)
+data$group <- ifelse(data$Cluster == 1, "Resistant", "Sensitive")
+table(data$group)
+# write.csv(data, "../03.out/figure1/01.FPMTB_exVivo_Resistant_Sensitive_Raw.csv")
+
+
+sample_cluster$Group <- ifelse(sample_cluster$Cluster == 1, "Resistant", "Sensitive")
+annotation_col = data.frame(
+  Group = factor(sample_cluster$Group)
+  )
+rownames(annotation_col) = colnames(core_mat1)
+ann_colors = list(
+  Group = c(Sensitive = "#7c9d97", Resistant = "#e9b383") 
+) 
+# pdf("../03.out/figure1/01.FPMTB_exVivo_drug_heatmap.pdf", width = 10, height = 6)
+out <- pheatmap::pheatmap(core_mat1,
+                #breaks = bk, 
+                cutree_cols = 3,
+                color = colorRampPalette(c("#4292C6", "#F0F0F0", "#A50F15"))(100),
+                scale = "row", border_color = "black", angle_col = 90,
+                show_rownames = TRUE, show_colnames = FALSE, na.rm =TRUE,
+                clustering_method = "ward.D",
+                annotation_colors = ann_colors,
+                annotation_col = annotation_col,
+                cluster_cols = T, cluster_rows = T
+)
+# dev.off()
+
+clust_sample <- colnames(core_mat1[, out$tree_col[["order"]]])
+clust_sample <- data.frame(clust_sample)
+sample_cluster <- data.frame(cutree(out$tree_col, k=3))
+colnames(sample_cluster) <- "Cluster"
+data <- cbind(t(core_mat), sample_cluster)
+data$group <- ifelse(data$Cluster == 1, "Resistant", "Sensitive")
+table(data$Cluster)
+# write.csv(data, "../03.out/figure1/01.FPMTB_exVivo_Resistant_Sensitive_Raw.csv")
+
+# Extract scaled values from the heatmap object
+# Create matrix and scale manually (same scaling as pheatmap uses)
+core_matrix <- as.matrix(core_mat1)
+scale_rows <- function(x) {
+  m <- apply(x, 1, mean, na.rm = TRUE)
+  s <- apply(x, 1, sd, na.rm = TRUE)
+  return((x - m) / s)
+}
+scaled_matrix <- scale_rows(core_matrix)
+
+# Get cluster assignments (k=3)
+cluster_assignments <- data.frame(Cluster = cutree(out$tree_col, k = 3))
+
+# Combine scaled values with cluster assignments
+result_data <- cbind(t(scaled_matrix), cluster_assignments)
+# write.csv(result_data, "../03.out/figure1/00.FPMTB_exVivo_scaled_scores_with_clusters.csv")
+```
+
+## Boxplot for drug sensitivity between resistant and sensitive
+
+```{r}
+library(ggplot2)
+library(ggpubr)
+library(RColorBrewer)
+library(tidyverse)
+library(ggrastr)
+library(ggbeeswarm)
+## Group (Resistant vs. Sensitive)
+mat <- read.csv("../03.out/figure1/01.FPMTB_exVivo_Resistant_Sensitive_Raw.csv", header = T, row.names = 1)
+mat <- mat[, c("Azacitidine", "Venetoclax", "group")]
+mat <- mat %>% gather(-"group", key = "drug", value = "sDSS") 
+
+p <- ggplot(mat, aes(x = group, y = sDSS, color = group)) + 
+  geom_boxplot_jitter() + geom_quasirandom(width=0.15, alpha = 0.5) +
+  facet_wrap(.~drug) + 
+  theme_pubr() + 
+  xlab("") + ylab("Drug sensitivity (sDSS)") +
+  theme(strip.text.x = element_text(size=13)) +
+  stat_compare_means(comparisons = list(c('Resistant', 'Sensitive')), method='wilcox.test', label =  "p.signif") + 
+  scale_color_manual(values = c("#e9b383", "#7c9d97")) +  
+  theme(legend.position='None')
+p
+# ggsave(p, filename = "../03.out/figure1/02.FPMTB_Resistant_Sensitive_DrugsDSS_group.pdf", width = 6, height = 4)
+
+## Cluster (1 2 3)
+mat <- read.csv("../03.out/figure1/01.FPMTB_exVivo_Resistant_Sensitive_Raw.csv", header = T, row.names = 1)
+mat <- mat[, c("Azacitidine", "Venetoclax", "Cluster")]
+mat <- mat %>% gather(-"Cluster", key = "drug", value = "sDSS") 
+
+mat$Cluster <- as.factor(mat$Cluster)
+
+p1 <- ggplot(mat, aes(x = Cluster, y = sDSS, color = Cluster)) + 
+  geom_boxplot_jitter() + 
+  geom_quasirandom(width=0.15, alpha = 0.5) +
+  facet_wrap(.~drug) + 
+  theme_pubr() + 
+  xlab("") + ylab("Drug sensitivity (sDSS)") +
+  theme(strip.text.x = element_text(size=13)) +
+  stat_compare_means(comparisons = list(c('1', '2'), c('1', '3'), c('2', '3')), 
+                     method='wilcox.test', label =  "p.signif") + 
+  scale_color_manual(values = c("#e9b383", "#7c9d97", "#9cb0c3")) +  
+  theme(legend.position='None')
+p1
+
+# ggsave(p1, filename = "../03.out/figure1/02.FPMTB_Resistant_Sensitive_DrugsDSS_Cluster.pdf", width = 6, height = 4)
+
+###################################
+####### Scaled sensitivity scores
+###################################
+
+# Clusters (1, 2, 3)
+drug_sensitivity_cluster <- read.csv("../03.out/figure1/00.FPMTB_exVivo_scaled_scores_with_clusters.csv", header = TRUE, row.names = 1)
+drug_sensitivity_cluster <- drug_sensitivity_cluster[, c("Azacitidine", "Venetoclax", "Cluster")]
+drug_sensitivity_cluster <- gather(drug_sensitivity_cluster, -Cluster, key = "drug", value = "sDSS")
+
+drug_sensitivity_cluster$Cluster <- as.factor(drug_sensitivity_cluster$Cluster)
+
+p2 <- ggplot(drug_sensitivity_cluster, aes(x = Cluster, y = sDSS, color = Cluster)) + 
+  geom_boxplot_jitter() + geom_quasirandom(width = 0.15, alpha = 0.5) +
+  facet_wrap(~drug) + 
+  theme_pubr() + 
+  xlab("") + ylab("Scaled Drug sensitivity (sDSS)") +
+  theme(strip.text.x = element_text(size = 13)) +
+  stat_compare_means(comparisons = list(c('1', '2'), c('1', '3'), c('2', '3')), method = 'wilcox.test', label = "p.signif") + 
+  scale_color_manual(values = c("#e9b383", "#7c9d97", "#9cb0c3")) +  
+  theme(legend.position = 'None')
+
+p2
+# ggsave(p2, filename = "../03.out/figure1/02.FPMTB_Resistant_Sensitive_DrugsDSS_Cluster_scaled.pdf", width = 6, height = 4)
+
+```
+
+## DE analysis Functional_medicine
+
+```{r eval=TRUE, message = FALSE, warning = FALSE}
+# library(dplyr)
+# library(DESeq2)
+# source("RunDESeq2.R")
+# newOrder <- read.csv("../03.out/figure1/01.FPMTB_exVivo_Resistant_Sensitive_Raw.csv", header = T, row.names = 1)
+# newOrder <- newOrder[order(newOrder$group, decreasing = FALSE), ]
+# table(newOrder$group)
+# tpm <- read.csv("../02.data/File_8_RNA_seq_TPM_163S_4Healthy.csv", header=T)
+# mat <- read.csv("../02.data/File_8_RNA_seq_Raw_Reads_163S_4Healthy.csv", header=TRUE)
+# mat <- merge(tpm[, 1:3], mat, by = "X")
+# mat <- subset(mat, Type == "protein_coding")
+# tpm <- tpm[which(rowMeans(tpm[, -c(1:3)])>0.1), ]
+# row.names(mat) <- mat$X
+# mat <- mat[, -c(1:3)]
+# colnames(tpm)[1] <- "ID"
+# overlap_sample <- intersect(row.names(newOrder), colnames(mat))
+# newOrder <- newOrder[overlap_sample,]
+# table(newOrder$group)
+# mat <- mat[, as.character(row.names(newOrder))]
+# tpm <- tpm[, c("ID", "Symbol", "Type", as.character(row.names(newOrder)))]
+# gs <- read.table("../03.out/figure3/84_gene.txt", header = F)
+# 
+# RunDESeq2(count_mat = mat, n.cont = 43, n.treat = 55,
+#           prefix = "../03.out/figure1/FPMTB_DESeq2_out_coding_fillterLow", sort.p = FALSE,
+#           merge.normalized = TRUE,
+#           normalized_mat = tpm)
+
+```
+
+## Valcanoplot plot (Ex vivo) ######
+
+```{r eval=TRUE, message=FALSE, warning=FALSE}
+source("plotVolcanoV3.R")
+m1 <- read.table("../03.out/figure1/FPMTB_DESeq2_out_coding_fillterLow_with_normalized_mat.txt", header = T)
+m2 <- m1[,1:9]
+# write.csv(m2, "../03.out/figure1/FPMTB_DESeq2_out.csv")
+degs1 <- subset(m2, abs(log2FoldChange) > 0.5 & padj < 0.05)
+
+degs_up <- subset(m2, log2FoldChange > 0.5 & padj < 0.05)
+degs_down <- subset(m2, log2FoldChange < -0.5 & padj < 0.05)
+
+gene_selecte <- "NA"
+m2$log2FoldChange[m2$log2FoldChange < -4] <- -4
+m2$padj[m2$padj < 1e-10] <- 1e-10
+p1 <- plotVolcano(mat=m2, gene.col="Symbol", x.col="log2FoldChange", y.col="padj", 
+                 labx = "log2FoldChange", laby = "-Log10FDR",
+                 x_cut1 = 0.5, x_cut2 = 1, y_cut1=0.05, y_cut2 = 0.01, x.lim=4, y.lim=10, 
+                 label=FALSE, title = "AZA+VEN (Ex vivo)", selected_genes = gene_selecte) + theme_classic()
+p1
+# ggsave(p1, filename = "../03.out/figure1/03.FPMTB_valcanoplot.pdf", width = 4.5, height = 4)
+```
+
+## Heatmap for representative DE genes
+
+```{r}
+library(pheatmap)
+heatmap_data <- read.csv("../03.out/figure1/FPMTB_heatmap.csv", header = TRUE, row.names = 1)
+
+# Prepare the matrix for heatmap generation
+core_matrix <- as.matrix(heatmap_data)
+breaks_seq <- unique(c(seq(-3, 3, length = 100)))
+
+# Define sample group annotations
+sample_groups <- data.frame(
+  Group = factor(c(rep("Resistant", 43), rep("Sensitive", 55)))
+)
+rownames(sample_groups) <- colnames(core_matrix)
+
+# Define colors for annotation groups
+annotation_colors <- list(
+  Group = c(Sensitive = "#7c9d97", Resistant = "#e9b383")
+)
+
+# Create and save the heatmap
+# pdf("../03.out/figure1/Out_FPMTB_heatmap.pdf", width = 5.5, height = 6)
+pheatmap(core_matrix,
+         breaks = breaks_seq,
+         cutree_cols = 2,
+         cutree_rows = 2,
+         color = colorRampPalette(c("#4292C6", "#F0F0F0", "#A50F15"))(100),
+         scale = "row", 
+         border_color = "black", 
+         angle_col = 90,
+         show_rownames = TRUE, 
+         show_colnames = FALSE, 
+         na.rm = TRUE,
+         clustering_method = "ward.D",
+         annotation_colors = annotation_colors,
+         annotation_col = sample_groups,
+         cluster_cols = FALSE, 
+         cluster_rows = TRUE)
+# dev.off()
+```
+
+## CIBERSORTx Results Visualization (ex vivo)
+
+```{r}
+library(ggplot2)
+library(ggpubr)
+library(RColorBrewer)
+library(tidyverse)
+library(ggrastr)
+library(ggbeeswarm)
+
+# Load CIBERSORTx results and filter necessary columns
+cibersortx_results <- read.csv("../03.out/figure1/CIBERSORTx_Results_FPMTB.csv", header = TRUE, row.names = 1, check.names = FALSE)
+cibersortx_results <- cibersortx_results[, c("LSPC-Primed", "Mono-like", "group")] 
+# Available columns for future use: "LSPC-Quiescent", "LSPC-Cycle", "GMP-like", "ProMono-like", "cDC-like"
+
+# Transform data from wide to long format
+cibersortx_long <- cibersortx_results %>% 
+  gather(-group, key = "cell_type", value = "Score")
+
+# Generate boxplot for cellular abundance comparison (Resistant vs. Sensitive)
+p <- ggplot(cibersortx_long, aes(x = group, y = Score, color = group)) + 
+  geom_boxplot_jitter() + 
+  geom_quasirandom(width = 0.15, alpha = 0.5) +
+  facet_wrap(~cell_type, ncol = 2) + 
+  theme_pubr() + 
+  xlab("") + 
+  ylab("Cellular abundance (CIBERSORTx)") +
+  theme(strip.text.x = element_text(size = 13)) +
+  stat_compare_means(comparisons = list(c('Resistant', 'Sensitive')), method = 'wilcox.test', label = "p.signif") + 
+  scale_color_manual(values = c("#e9b383", "#7c9d97")) +  
+  theme(legend.position = 'None')
+
+# Display plot
+p
+
+# Save plot to file
+# ggsave(p, filename = "../03.out/figure1/Out_FPMTB_Resistant_Sensitive_cibersortx.pdf", width = 2.5, height = 4.5)
+
+```
+
+## CIBERSORTx Results Visualization (in vivo)
+
+```{r}
+library(ggplot2)
+library(ggpubr)
+library(RColorBrewer)
+library(tidyverse)
+library(ggrastr)
+library(ggbeeswarm)
+
+# Load CIBERSORTx results and filter necessary columns
+cibersortx_results <- read.csv("../03.out/figure1/CIBERSORTx_142_Results.csv", header = TRUE, row.names = 1, check.names = FALSE)
+cibersortx_results <- cibersortx_results[, c("Mono-like", "Response")] 
+cibersortx_results$cell_type <- "Mono-like"
+
+# Generate boxplot for cellular abundance comparison (Resistant vs. Sensitive)
+p <- ggplot(cibersortx_results, aes(x = Response, y = `Mono-like`, color = Response)) + 
+  geom_boxplot_jitter() + 
+  geom_quasirandom(width = 0.15, alpha = 0.5) +
+  facet_wrap(~cell_type, ncol = 2) + 
+  theme_pubr() + 
+  xlab("") + 
+  ylab("Mono-like abundance (CIBERSORTx)") +
+  theme(strip.text.x = element_text(size = 13)) +
+  stat_compare_means(comparisons = list(c('CR', 'NonCR')), method = 'wilcox.test', label = "p.signif") + 
+  scale_color_manual(values = c("#e9b383", "#7c9d97")) +  
+  theme(legend.position = 'None')
+
+# Display plot
+p
+
+cibersortx_results <- read.csv("../03.out/figure1/CIBERSORTx_142_Results.csv", header = TRUE, row.names = 1, check.names = FALSE)
+cibersortx_results <- cibersortx_results[, c("Total LSPC", "LSPC-Cycle", "LSPC-Primed", "LSPC-Quiescent", "Response")] 
+
+# Transform data from wide to long format
+cibersortx_long <- cibersortx_results %>% 
+  gather(-Response, key = "cell_type", value = "Score")
+
+# Generate boxplot for cellular abundance comparison (Resistant vs. Sensitive)
+p1 <- ggplot(cibersortx_long, aes(x = Response, y = Score, color = Response)) + 
+  geom_boxplot_jitter() + 
+  geom_quasirandom(width = 0.15, alpha = 0.5) +
+  facet_wrap(~cell_type, ncol = 4) + 
+  theme_pubr() + 
+  xlab("") + 
+  ylab("Cellular abundance (CIBERSORTx)") +
+  theme(strip.text.x = element_text(size = 13)) +
+  stat_compare_means(comparisons = list(c('CR', 'NonCR')), method = 'wilcox.test', label = "p.signif") + 
+  scale_color_manual(values = c("#e9b383", "#7c9d97")) +  
+  theme(legend.position = 'None')
+
+# Display plot
+p1
+```
+
+## ssGSEA analysis in vivo 
+
+```{r}
+library(GSVA)
+library(GSEABase)
+library(patchwork)
+library(ggpubr)
+library(tidyverse)
+library(ggrastr)
+library(ggbeeswarm)
+
+# tpm <- read.csv("../03.out/figure1/cohort1_2_cibersortx.csv", header = TRUE, row.names = 1, check.names = FALSE)
+# gene.set <- read.csv("../03.out/figure1/Mono_LSC_genes.csv", header = T, sep = ",")
+# geneSets <- list(Monocyte_Differentiation = gene.set$Monocyte_Differentiation,
+#                  LSC_UP = gene.set$LSC_UP)
+# 
+# tpm <- as.matrix(tpm)
+# gsvapar <- gsvaParam(tpm, geneSets, maxDiff=TRUE)
+# gsva_es <- gsva(gsvapar)
+# gsva_es <- data.frame(t(gsva_es))
+# gsva_es$Sample <- row.names(gsva_es)
+# 
+# clinic <- read.csv("../03.out/figure1/CIBERSORTx_142_Results.csv", header = TRUE, check.names = FALSE)
+# clinic <- clinic[, c("Sample", "Response")]
+# 
+# gsva_es <- merge(gsva_es, clinic, by = "Sample")
+# write.csv(gsva_es, "../03.out/figure1/gsva_es.out.csv")
+
+gsva_es <- read.csv("../03.out/figure1/gsva_es.out.csv", header = T)
+# Transform data from wide to long format
+gsva_es_long <- gsva_es[, -1] %>% 
+  gather(-Response, key = "cell_type", value = "Score")
+
+# Generate boxplot for cellular abundance comparison (Resistant vs. Sensitive)
+p2 <- ggplot(gsva_es_long, aes(x = Response, y = Score, color = Response)) + 
+  geom_boxplot_jitter() + 
+  geom_quasirandom(width = 0.15, alpha = 0.5) +
+  facet_wrap(~cell_type, ncol = 2, scales = "free") + 
+  theme_pubr() + 
+  xlab("") + 
+  ylab("Signature score (ssGSEA)") +
+  theme(strip.text.x = element_text(size = 13)) +
+  stat_compare_means(comparisons = list(c('CR', 'NonCR')), method = 'wilcox.test', label = "p.signif") + 
+  scale_color_manual(values = c("#e9b383", "#7c9d97")) +  
+  theme(legend.position = 'None')
+
+p2
+```
+
+## GO Enrichment Dot Plot
+
+```{r}
+library(ggplot2)
+go_enrichment_data <- read.csv("../03.out/figure1/Metascape_DEGs_plot.csv", header = TRUE)
+
+# Reorder factor levels based on GO description
+go_enrichment_data$Description <- factor(go_enrichment_data$Description, levels = rev(go_enrichment_data$Description))
+
+# Generate dot plot for GO enrichment results
+p <- ggplot(go_enrichment_data, aes(x = NA, y = Description, color = Z.score, size = negLogP)) + 
+  geom_point(stroke = 1) + 
+  labs(x = "", y = "") +
+  theme_classic() +
+  scale_color_gradient(low = "#DADAEB", high = "#7582c1") +
+  scale_size("negLogP", limits = c(5, 18), range = c(2, 6)) +
+  theme_bw() +
+  theme(axis.text.x = element_text(angle = 45))
+
+# Display plot
+p
+
+# Save plot to file
+# ggsave(p, filename = "figure1/Out_DEGs_enrichment_dotplot.pdf", width = 4, height = 5)
+```
